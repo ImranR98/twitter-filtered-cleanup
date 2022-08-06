@@ -77,14 +77,12 @@ def delete_targets(target_file, api_key, api_secret, access_key, access_secret):
         json_data = data_file.read()
     target_tweets = json.loads(json_data)
 
-    # Step 3.1: Login
-    auth = tweepy.OAuth1UserHandler(
-        api_key, api_secret, access_key, access_secret)
-    api = tweepy.API(auth, wait_on_rate_limit=True,
-                     wait_on_rate_limit_notify=True)
-    print("\nAUTHENTICATED AS:   %s" % api.me().screen_name)
-
-    # Step 3.2: Delete/un-like all marked tweets
+    # Login
+    client = tweepy.Client(
+        consumer_key=api_key, consumer_secret=api_secret, access_token=access_key, access_token_secret=access_secret, wait_on_rate_limit=True)
+    print("AUTHENTICATED AS:   " + client.get_me()[0]["username"])
+    
+    # Delete/un-like all marked tweets
     delete_count = 0
     unlike_count = 0
     for tweet in target_tweets:
@@ -92,21 +90,20 @@ def delete_targets(target_file, api_key, api_secret, access_key, access_secret):
         is_like = tweet["isLike"]
         if is_like:
             try:
-                api.destroy_favorite(int(tweet_id))
-                print("\nTWEET UN-LIKED:    ", tweet_id, "un-liked")
+                client.unlike(int(tweet_id))
+                print("TWEET UN-LIKED:    ", tweet_id)
                 unlike_count += 1
-            except tweepy.error.TweepError as e:
-                print("\nTWEET NOT UN-LIKED:", tweet_id,
-                      "could not be un-liked:", e.reason)
+            except tweepy.errors.TweepyException as e:
+                print("TWEET NOT UN-LIKED:", tweet_id, "-", e)
         else:
             try:
-                api.destroy_status(int(tweet_id))
-                print("\nTWEET DELETED:     ", tweet_id)
+                client.delete_tweet(int(tweet_id))
+                print("TWEET DELETED:     ", tweet_id)
                 delete_count += 1
-            except tweepy.error.TweepError as e:
-                print("\nTWEET NOT DELETED: ", tweet_id, "-", e.reason)
-    print("\n# TWEETS DELETED:  ", delete_count)
-    print("\n# TWEETS UN-LIKED: ", unlike_count)
+            except tweepy.errors.TweepyException() as e:
+                print("TWEET NOT DELETED: ", tweet_id, "-", e)
+    print("# TWEETS DELETED:  ", delete_count)
+    print("# TWEETS UN-LIKED: ", unlike_count)
 
 
 def usage(is_error=False):
