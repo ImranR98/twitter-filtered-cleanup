@@ -11,15 +11,21 @@
 import tweepy
 import json
 import datetime
+import time
 import sys
 
 
-def generate_targets(twitter_export_dir, destination_dir, filter_strings):
+def generate_targets(twitter_export_dir, destination_dir, filter):
     """
-    Given an extracted Twitter data export directory, a destination directory, and an array of strings, 
-    this function looks for Tweets and Likes that contain text matching any string from the array, then 
+    Given an extracted Twitter data export directory, a destination directory, and a filter (an array of strings or a number of days), 
+    this function looks for Tweets and Likes that match the filter (if it is a number of days, ALL LIKES are targeted), then 
     saves the associated text, IDs, and types to an output JSON file in the destination directory.
     """
+
+    if type(filter) == int:
+        print("WARNING: Tweets older than", str(filter),
+              "days will be targeted, but ALL Likes will be targeted regardless of age", file=sys.stderr)
+
     # Find and parse tweet.js
     with open(twitter_export_dir + "/data/tweet.js", "rt", encoding="utf-8") as data_file:
         data_file.seek(25)
@@ -35,19 +41,32 @@ def generate_targets(twitter_export_dir, destination_dir, filter_strings):
     # Generate array of tweets to delete or un-like
     target_tweets = []
 
-    def tweet_filter(tweet_text):
+    def string_filter(tweet_text):
         text_found = False
-        for fs in filter_strings:
+        for fs in filter:
             if (tweet_text.lower().find(fs.lower()) != -1):
                 text_found = True
                 break
         return text_found
 
+    def time_filter(tweet_time_string):
+        tweet_time = datetime.datetime.fromtimestamp(time.mktime(
+            time.strptime(tweet_time_string, "%a %b %d %H:%M:%S %z %Y")))
+        limit_time = datetime.datetime.now() - datetime.timedelta(filter)
+        return limit_time > tweet_time
+
+    def tweet_filter(tweet_text, tweet_time_string):
+        if type(filter) == int:
+            return time_filter(tweet_time_string)
+        else:
+            return string_filter(tweet_text)
+
     for t in tweets:
         tweet = t["tweet"]
         tweet_id = tweet["id_str"]
         tweet_text = tweet["full_text"]
-        if tweet_filter(tweet_text):
+        tweet_time_string = tweet["created_at"]
+        if (time_filter(tweet_time_string) if type(filter) == int else string_filter(tweet_text)):
             target_tweets.append(
                 {"id": tweet_id, "text": tweet_text, "isLike": False})
 
@@ -55,7 +74,7 @@ def generate_targets(twitter_export_dir, destination_dir, filter_strings):
         like = l["like"]
         tweet_id = like["tweetId"]
         tweet_text = like["fullText"]
-        if tweet_filter(tweet_text):
+        if (True if type(filter) == int else string_filter(tweet_text)):
             target_tweets.append(
                 {"id": tweet_id, "text": tweet_text, "isLike": True})
 
@@ -81,7 +100,7 @@ def delete_targets(target_file, api_key, api_secret, access_key, access_secret):
     client = tweepy.Client(
         consumer_key=api_key, consumer_secret=api_secret, access_token=access_key, access_token_secret=access_secret, wait_on_rate_limit=True)
     print("AUTHENTICATED AS:   " + client.get_me()[0]["username"])
-    
+
     # Delete/un-like all marked tweets
     delete_count = 0
     unlike_count = 0
@@ -106,12 +125,14 @@ def delete_targets(target_file, api_key, api_secret, access_key, access_secret):
     print("# TWEETS UN-LIKED: ", unlike_count)
 
 
-def usage(is_error=False):
+def usage(is_error=True):
     usage_command_prefix = "python " + sys.argv[0] + " "
-    usage_command_1 = "target [Twitter export directory] [target file destination directory] [filter string 1] [filter string 2] [filter string 3] ..."
-    usage_command_2 = "delete [target file path] [Twitter App API key] [Twitter App API secret] [Twitter App account access key] [Twitter App account access secret]"
+    usage_command_1 = "target strings [Twitter export directory] [target file destination directory] [filter string 1] [filter string 2] [filter string 3] ..."
+    usage_command_2 = "target before  [Twitter export directory] [target file destination directory] [how old in days Tweets must be to target (all Likes targeted)]"
+    usage_command_3 = "delete [target file path] [Twitter App API key] [Twitter App API secret] [Twitter App account access key] [Twitter App account access secret]"
     usage_string = "Usage: " + usage_command_prefix + \
-        usage_command_1 + "\n       " + usage_command_prefix + usage_command_2
+        usage_command_1 + "\n       " + usage_command_prefix + \
+        usage_command_2 + "\n       " + usage_command_prefix + usage_command_3
     if is_error:
         print(usage_string, file=sys.stderr)
         quit(1)
@@ -121,15 +142,20 @@ def usage(is_error=False):
 
 # Parse arguments and run accordingly
 if len(sys.argv) < 2:
-    usage(True)
+    usage()
 if sys.argv[1] != "target" and sys.argv[1] != "delete":
-    usage(True)
+    usage()
 if sys.argv[1] == "target":
-    if len(sys.argv) < 5:
-        usage(True)
-    generate_targets(sys.argv[2], sys.argv[3], sys.argv[4:])
+    if len(sys.argv) < 6:
+        usage()
+    if sys.argv[2] == "strings":
+        generate_targets(sys.argv[3], sys.argv[4], sys.argv[5:])
+    elif sys.argv[2] == "before":
+        generate_targets(sys.argv[3], sys.argv[4], int(sys.argv[5]))
+    else:
+        usage()
 if sys.argv[1] == "delete":
     if len(sys.argv) != 7:
-        usage(True)
+        usage()
     delete_targets(sys.argv[2], sys.argv[3],
                    sys.argv[4], sys.argv[5], sys.argv[6])
